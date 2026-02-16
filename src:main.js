@@ -1,90 +1,97 @@
 import { Actor } from 'apify';
 import natural from 'natural';
-import { createObjectCsvWriter } from 'csv-writer';
-import fs from 'fs';
+import { createObjectCsvStringifier } from 'csv-writer';
 
 await Actor.init();
 
-console.log("Actor started...");
+const input = await Actor.getInput() || {};
+const maxPosts = input.maxPosts || 50;
 
-const maxPosts = 50;
+console.log("Actor started.");
+
+//////////////////////////////////////////////////
+// CONFIG
+//////////////////////////////////////////////////
 
 const keywordsAI = ["AI", "ChatGPT", "artificial intelligence"];
 const conflictKeywords = ["argument", "fight", "conflict", "disagree"];
 const relationshipKeywords = ["friend", "partner", "roommate", "coworker", "classmate"];
 const youthIndicators = ["college", "university", "campus", "freshman", "sophomore", "junior", "senior"];
 
+//////////////////////////////////////////////////
+// NLP SETUP
+//////////////////////////////////////////////////
+
 const analyzer = new natural.SentimentAnalyzer("English", natural.PorterStemmer, "afinn");
 const tokenizer = new natural.WordTokenizer();
 
 function sentiment(text) {
-    return analyzer.getSentiment(tokenizer.tokenize(text));
+    return analyzer.getSentiment(tokenizer.tokenize(text || ""));
 }
 
 function contains(text, list) {
-    const lower = text.toLowerCase();
+    const lower = (text || "").toLowerCase();
     return list.some(k => lower.includes(k.toLowerCase()));
 }
 
-async function searchReddit(query) {
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+//////////////////////////////////////////////////
+// REDDIT SAFE FETCH
+//////////////////////////////////////////////////
+
+async function safeFetch(url) {
     try {
-        const res = await fetch(`https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&limit=10`, {
-            headers: { "User-Agent": "research-bot" }
+        const res = await fetch(url, {
+            headers: { "User-Agent": "apify-research-bot" }
         });
 
+        if (res.status === 429) {
+            console.log("Rate limited. Sleeping 5 seconds...");
+            await sleep(5000);
+            return null;
+        }
+
         if (!res.ok) {
-            console.log("Reddit API error:", res.status);
+            console.log("HTTP Error:", res.status);
             return null;
         }
 
         return await res.json();
+
     } catch (err) {
-        console.log("Search error:", err.message);
+        console.log("Fetch error:", err.message);
         return null;
     }
 }
 
-async function fetchComments(permalink) {
-    try {
-        const res = await fetch(`https://www.reddit.com${permalink}.json`, {
-            headers: { "User-Agent": "research-bot" }
-        });
-
-        if (!res.ok) return [];
-
-        const data = await res.json();
-        const comments = [];
-
-        if (data[1]?.data?.children) {
-            for (const c of data[1].data.children) {
-                if (c.data?.body) comments.push(c.data.body);
-            }
-        }
-
-        return comments;
-    } catch {
-        return [];
-    }
-}
+//////////////////////////////////////////////////
+// SCRAPING
+//////////////////////////////////////////////////
 
 let dataset = [];
-let count = 0;
+let collected = 0;
 
 for (const ai of keywordsAI) {
     for (const rel of relationshipKeywords) {
         for (const conflict of conflictKeywords) {
 
-            if (count >= maxPosts) break;
+            if (collected >= maxPosts) break;
 
             const query = `${ai} ${rel} ${conflict} college`;
             console.log("Searching:", query);
 
-            const results = await searchReddit(query);
-            if (!results?.data?.children) continue;
+            const data = await safeFetch(
+                `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&limit=10`
+            );
 
-            for (const post of results.data.children) {
+            if (!data?.data?.children) continue;
 
-                if (count >= maxPosts) break;
+            for (const post of data.data.children) {
+
+                if (collected >= maxPosts) break;
 
                 const p = post.data;
                 const fullText = `${p.title} ${p.selftext}`;
@@ -96,12 +103,22 @@ for (const ai of keywordsAI) {
                     contains(fullText, youthIndicators)
                 ) {
 
-                    const comments = await fetchComments(p.permalink);
+                    const commentsData = await safeFetch(
+                        `https://www.reddit.com${p.permalink}.json`
+                    );
+
+                    let comments = [];
+
+                    if (commentsData?.[1]?.data?.children) {
+                        comments = commentsData[1].data.children
+                            .map(c => c.data?.body)
+                            .filter(Boolean);
+                    }
 
                     const entry = {
                         url: `https://reddit.com${p.permalink}`,
                         post_sentiment: sentiment(fullText),
-                        avg_comment_sentiment: comments.length > 0
+                        avg_comment_sentiment: comments.length
                             ? comments.map(c => sentiment(c)).reduce((a,b)=>a+b,0) / comments.length
                             : 0,
                         comment_count: comments.length,
@@ -110,7 +127,9 @@ for (const ai of keywordsAI) {
 
                     dataset.push(entry);
                     await Actor.pushData(entry);
-                    count++;
+                    collected++;
+
+                    await sleep(1000); // throttle
                 }
             }
         }
@@ -118,34 +137,30 @@ for (const ai of keywordsAI) {
 }
 
 //////////////////////////////////////////////////
-// SAFE STATISTICS
+// STATISTICS
 //////////////////////////////////////////////////
 
-if (dataset.length === 0) {
-    console.log("No data collected.");
-    await Actor.exit();
-}
-
-const avgPostSent =
-    dataset.reduce((s,d)=>s+d.post_sentiment,0) / dataset.length;
-
-const avgCommentSent =
-    dataset.reduce((s,d)=>s+d.avg_comment_sentiment,0) / dataset.length;
-
-const summary = {
+let summary = {
     total_posts: dataset.length,
-    avg_post_sentiment: avgPostSent,
-    avg_comment_sentiment: avgCommentSent
+    avg_post_sentiment: 0,
+    avg_comment_sentiment: 0
 };
+
+if (dataset.length > 0) {
+    summary.avg_post_sentiment =
+        dataset.reduce((s,d)=>s+d.post_sentiment,0) / dataset.length;
+
+    summary.avg_comment_sentiment =
+        dataset.reduce((s,d)=>s+d.avg_comment_sentiment,0) / dataset.length;
+}
 
 console.log("SUMMARY:", summary);
 
 //////////////////////////////////////////////////
-// SAFE CSV EXPORT
+// SAVE FILES TO APIFY STORAGE
 //////////////////////////////////////////////////
 
-const csvWriter = createObjectCsvWriter({
-    path: './dataset.csv',
+const csvStringifier = createObjectCsvStringifier({
     header: [
         { id: 'url', title: 'URL' },
         { id: 'post_sentiment', title: 'POST_SENTIMENT' },
@@ -155,9 +170,12 @@ const csvWriter = createObjectCsvWriter({
     ]
 });
 
-await csvWriter.writeRecords(dataset);
-fs.writeFileSync("./summary.json", JSON.stringify(summary, null, 2));
+const csv =
+    csvStringifier.getHeaderString() +
+    csvStringifier.stringifyRecords(dataset);
+
+await Actor.setValue("dataset.csv", csv, { contentType: "text/csv" });
+await Actor.setValue("summary.json", summary);
 
 console.log("Run completed successfully.");
-
 await Actor.exit();

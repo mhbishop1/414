@@ -1,0 +1,12 @@
+{
+  "title": "AI Youth Conflict Research Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "maxPosts": {
+      "title": "Maximum Posts",
+      "type": "integer",
+      "default": 50
+    }
+  }
+}
