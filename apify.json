@@ -1,7 +1,7 @@
 {
-    "name": "graduate-ai-conflict-research",
-    "title": "AI & Youth Partnership Conflict Analyzer",
-    "description": "Scrapes Reddit posts and comments for AI-related partnership conflicts among young people and generates statistical summaries.",
-    "version": "2.0",
-    "buildTag": "latest"
-  }
+  "name": "graduate-ai-conflict-research",
+  "title": "AI & Youth Partnership Conflict Analyzer",
+  "description": "Scrapes Reddit posts and comments for AI-related partnership conflicts among young people and generates statistical summaries.",
+  "version": "2.0",
+  "buildTag": "latest"
+}

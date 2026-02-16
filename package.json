@@ -1,11 +1,11 @@
 {
-    "name": "graduate-ai-conflict-research",
-    "version": "2.0.0",
-    "type": "module",
-    "dependencies": {
-      "apify": "^3.0.0",
-      "natural": "^6.5.0",
-      "csv-writer": "^1.6.0",
-      "node-fetch": "^3.3.2"
-    }
+  "name": "graduate-ai-conflict-research",
+  "version": "2.0.0",
+  "type": "module",
+  "dependencies": {
+    "apify": "^3.0.0",
+    "natural": "^6.5.0",
+    "csv-writer": "^1.6.0",
+    "node-fetch": "^3.3.2"
   }
+}

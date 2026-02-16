@@ -1,25 +1,18 @@
 import { Actor } from 'apify';
 import natural from 'natural';
-import fetch from 'node-fetch';
 import { createObjectCsvWriter } from 'csv-writer';
 import fs from 'fs';
 
 await Actor.init();
 
-//////////////////////////////////////////////////
-// CONFIG
-//////////////////////////////////////////////////
+console.log("Actor started...");
 
-const maxPosts = 100;
+const maxPosts = 50;
 
-const keywordsAI = ["AI", "ChatGPT", "artificial intelligence", "LLM", "generative AI"];
-const conflictKeywords = ["argument", "fight", "conflict", "disagree", "tension", "drama"];
-const relationshipKeywords = ["friend", "boyfriend", "girlfriend", "partner", "roommate", "coworker", "classmate", "team"];
-const youthIndicators = ["college", "university", "campus", "freshman", "sophomore", "junior", "senior", "dorm", "19", "20", "21", "22"];
-
-//////////////////////////////////////////////////
-// NLP SETUP
-//////////////////////////////////////////////////
+const keywordsAI = ["AI", "ChatGPT", "artificial intelligence"];
+const conflictKeywords = ["argument", "fight", "conflict", "disagree"];
+const relationshipKeywords = ["friend", "partner", "roommate", "coworker", "classmate"];
+const youthIndicators = ["college", "university", "campus", "freshman", "sophomore", "junior", "senior"];
 
 const analyzer = new natural.SentimentAnalyzer("English", natural.PorterStemmer, "afinn");
 const tokenizer = new natural.WordTokenizer();
@@ -33,51 +26,46 @@ function contains(text, list) {
     return list.some(k => lower.includes(k.toLowerCase()));
 }
 
-function classifyRelationship(text) {
-    const lower = text.toLowerCase();
-    if (lower.includes("boyfriend") || lower.includes("girlfriend") || lower.includes("partner")) return "Romantic";
-    if (lower.includes("friend")) return "Friendship";
-    if (lower.includes("roommate")) return "Roommate";
-    if (lower.includes("coworker")) return "Workplace";
-    if (lower.includes("classmate") || lower.includes("team")) return "Academic Team";
-    return "Other";
-}
-
-function classifyConflict(text) {
-    const lower = text.toLowerCase();
-    if (lower.includes("cheat") || lower.includes("plagiarism")) return "Academic Integrity";
-    if (lower.includes("ethic") || lower.includes("moral")) return "Ethical Debate";
-    if (lower.includes("jealous")) return "Jealousy";
-    return "General";
-}
-
-//////////////////////////////////////////////////
-// REDDIT FUNCTIONS
-//////////////////////////////////////////////////
-
 async function searchReddit(query) {
-    const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&limit=10`;
-    const res = await fetch(url, { headers: { "User-Agent": "research-bot" } });
-    return res.json();
+    try {
+        const res = await fetch(`https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&limit=10`, {
+            headers: { "User-Agent": "research-bot" }
+        });
+
+        if (!res.ok) {
+            console.log("Reddit API error:", res.status);
+            return null;
+        }
+
+        return await res.json();
+    } catch (err) {
+        console.log("Search error:", err.message);
+        return null;
+    }
 }
 
 async function fetchComments(permalink) {
-    const res = await fetch(`https://www.reddit.com${permalink}.json`, {
-        headers: { "User-Agent": "research-bot" }
-    });
-    const data = await res.json();
-    const comments = [];
-    if (data[1]?.data?.children) {
-        for (const c of data[1].data.children) {
-            if (c.data?.body) comments.push(c.data.body);
-        }
-    }
-    return comments;
-}
+    try {
+        const res = await fetch(`https://www.reddit.com${permalink}.json`, {
+            headers: { "User-Agent": "research-bot" }
+        });
 
-//////////////////////////////////////////////////
-// DATA COLLECTION
-//////////////////////////////////////////////////
+        if (!res.ok) return [];
+
+        const data = await res.json();
+        const comments = [];
+
+        if (data[1]?.data?.children) {
+            for (const c of data[1].data.children) {
+                if (c.data?.body) comments.push(c.data.body);
+            }
+        }
+
+        return comments;
+    } catch {
+        return [];
+    }
+}
 
 let dataset = [];
 let count = 0;
@@ -89,8 +77,9 @@ for (const ai of keywordsAI) {
             if (count >= maxPosts) break;
 
             const query = `${ai} ${rel} ${conflict} college`;
-            const results = await searchReddit(query);
+            console.log("Searching:", query);
 
+            const results = await searchReddit(query);
             if (!results?.data?.children) continue;
 
             for (const post of results.data.children) {
@@ -108,18 +97,13 @@ for (const ai of keywordsAI) {
                 ) {
 
                     const comments = await fetchComments(p.permalink);
-                    const postSent = sentiment(fullText);
-                    const commentSentAvg =
-                        comments.length > 0
-                            ? comments.map(c => sentiment(c)).reduce((a, b) => a + b, 0) / comments.length
-                            : 0;
 
                     const entry = {
                         url: `https://reddit.com${p.permalink}`,
-                        relationship_type: classifyRelationship(fullText),
-                        conflict_type: classifyConflict(fullText),
-                        post_sentiment: postSent,
-                        avg_comment_sentiment: commentSentAvg,
+                        post_sentiment: sentiment(fullText),
+                        avg_comment_sentiment: comments.length > 0
+                            ? comments.map(c => sentiment(c)).reduce((a,b)=>a+b,0) / comments.length
+                            : 0,
                         comment_count: comments.length,
                         created: new Date(p.created_utc * 1000).toISOString()
                     };
@@ -134,54 +118,46 @@ for (const ai of keywordsAI) {
 }
 
 //////////////////////////////////////////////////
-// STATISTICAL SUMMARY
+// SAFE STATISTICS
 //////////////////////////////////////////////////
 
-const total = dataset.length;
-
-const avgPostSentiment =
-    dataset.reduce((sum, d) => sum + d.post_sentiment, 0) / total;
-
-const avgCommentSentiment =
-    dataset.reduce((sum, d) => sum + d.avg_comment_sentiment, 0) / total;
-
-const relationshipDistribution = {};
-const conflictDistribution = {};
-
-for (const d of dataset) {
-    relationshipDistribution[d.relationship_type] =
-        (relationshipDistribution[d.relationship_type] || 0) + 1;
-
-    conflictDistribution[d.conflict_type] =
-        (conflictDistribution[d.conflict_type] || 0) + 1;
+if (dataset.length === 0) {
+    console.log("No data collected.");
+    await Actor.exit();
 }
 
+const avgPostSent =
+    dataset.reduce((s,d)=>s+d.post_sentiment,0) / dataset.length;
+
+const avgCommentSent =
+    dataset.reduce((s,d)=>s+d.avg_comment_sentiment,0) / dataset.length;
+
 const summary = {
-    total_posts: total,
-    avg_post_sentiment: avgPostSentiment,
-    avg_comment_sentiment: avgCommentSentiment,
-    relationship_distribution: relationshipDistribution,
-    conflict_distribution: conflictDistribution
+    total_posts: dataset.length,
+    avg_post_sentiment: avgPostSent,
+    avg_comment_sentiment: avgCommentSent
 };
 
-console.log("STATISTICAL SUMMARY:");
-console.log(summary);
+console.log("SUMMARY:", summary);
 
 //////////////////////////////////////////////////
-// CSV EXPORT
+// SAFE CSV EXPORT
 //////////////////////////////////////////////////
 
 const csvWriter = createObjectCsvWriter({
     path: './dataset.csv',
-    header: Object.keys(dataset[0] || {}).map(key => ({ id: key, title: key }))
+    header: [
+        { id: 'url', title: 'URL' },
+        { id: 'post_sentiment', title: 'POST_SENTIMENT' },
+        { id: 'avg_comment_sentiment', title: 'AVG_COMMENT_SENTIMENT' },
+        { id: 'comment_count', title: 'COMMENT_COUNT' },
+        { id: 'created', title: 'CREATED' }
+    ]
 });
 
-if (dataset.length > 0) {
-    await csvWriter.writeRecords(dataset);
-    console.log("CSV Export Complete");
-}
-
-// Save summary file
+await csvWriter.writeRecords(dataset);
 fs.writeFileSync("./summary.json", JSON.stringify(summary, null, 2));
+
+console.log("Run completed successfully.");
 
 await Actor.exit();
