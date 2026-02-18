@@ -20,16 +20,16 @@ try {
             name: 'TikTok',
             actorId: 'clockworks/tiktok-scraper',
             input: { 
-                searchQueries: ["AI student conflict", "ChatGPT college fight"], 
-                resultsPerPage: 500 
+                searchQueries: ["AI relationship conflict", "ChatGPT relationship advice"], 
+                resultsPerPage: 250 
             }
         },
         {
             name: 'Reddit',
             actorId: 'comchat/reddit-api-scraper',
             input: { 
-                searchList: ["AI university argument"], 
-                resultsLimit: 500,
+                searchList: ["AI relationship advice"], 
+                resultsLimit: 250, // Stay within the 250 limit
                 sortBy: "relevance"
             }
         },
@@ -37,8 +37,8 @@ try {
             name: 'X (Twitter)',
             actorId: 'apidojo/twitter-scraper-lite',
             input: { 
-                searchTerms: ["ChatGPT cheating university"], 
-                maxItems: 500 
+                searchTerms: ["AI relationship advice"], 
+                maxItems: 250 
             }
         }
     ];
