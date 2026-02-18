@@ -1,15 +1,21 @@
 {
-    "title": "AI Youth Conflict Scraper",
+    "title": "Group Research Orchestrator",
     "type": "object",
     "schemaVersion": 1,
     "properties": {
-        "maxPosts": {
-            "title": "Max Posts",
+        "apiToken": {
+            "title": "Apify API Token",
+            "type": "string",
+            "description": "Your personal API token (Settings > Integrations). Required to run other Actors.",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "maxItems": {
+            "title": "Max Items per Platform",
             "type": "integer",
-            "description": "The maximum number of Reddit posts to scrape for your research.",
-            "default": 50,
-            "minimum": 1
+            "description": "Number of results to pull from each site.",
+            "default": 10
         }
     },
-    "required": ["maxPosts"]
+    "required": ["apiToken"]
 }
