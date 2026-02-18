@@ -15,12 +15,12 @@ try {
         {
             name: 'TikTok',
             actorId: 'clockworks/tiktok-scraper',
-            input: { searchQueries: ["AI student conflict"], resultsPerPage: 20 }
+            input: { searchQueries: ["AI conflict"], resultsPerPage: 20 }
         },
         {
             name: 'Reddit',
-            actorId: 'apify/reddit-scraper', // Or your group mate's specific public actor
-            input: { searchTerms: ["ChatGPT university argument"], maxPosts: 20 }
+            actorId: 'comchat/reddit-api-scraper', // Or your group mate's specific public actor
+            input: { searchTerms: ["ai", "ai-advicex"], maxPosts: 20 }
         }
     ];
 
