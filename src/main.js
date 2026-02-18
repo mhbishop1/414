@@ -1,125 +1,176 @@
 import { Actor } from 'apify';
 import natural from 'natural';
 import { createObjectCsvStringifier } from 'csv-writer';
-// Use fetch from undici or global in Node 18+
 
 await Actor.init();
 
-const input = await Actor.getInput() || {};
-const maxPosts = input.maxPosts || 10; // Start small for testing
+// 1. PROXY SETUP
+// This is essential to prevent Reddit from blocking your IP.
+const proxyConfiguration = await Actor.createProxyConfiguration();
 
-console.log("🚀 Actor started.");
+const input = await Actor.getInput() || {};
+const maxPosts = input.maxPosts || 50;
+
+console.log("🚀 Actor started. Target posts:", maxPosts);
+
+//////////////////////////////////////////////////
+// CONFIG & NLP SETUP
+//////////////////////////////////////////////////
+
+const keywordsAI = ["AI", "ChatGPT", "artificial intelligence"];
+const conflictKeywords = ["argument", "fight", "conflict", "disagree"];
+const relationshipKeywords = ["friend", "partner", "roommate", "coworker"];
+const youthIndicators = ["college", "university", "campus", "student"];
 
 const analyzer = new natural.SentimentAnalyzer("English", natural.PorterStemmer, "afinn");
 const tokenizer = new natural.WordTokenizer();
 
-// Helper: Improved Sentiment Logic
+// Helper: Get sentiment with safety check
 function getSentimentScore(text) {
     if (!text || text.trim().length === 0) return 0;
     const tokens = tokenizer.tokenize(text);
-    return tokens.length > 0 ? analyzer.getSentiment(tokens) : 0;
+    try {
+        return tokens.length > 0 ? analyzer.getSentiment(tokens) : 0;
+    } catch (e) {
+        return 0;
+    }
 }
 
-// Helper: Throttled Fetch
+function contains(text, list) {
+    const lower = (text || "").toLowerCase();
+    return list.some(k => lower.includes(k.toLowerCase()));
+}
+
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+//////////////////////////////////////////////////
+// REDDIT SAFE FETCH (With Proxy & Modern Headers)
+//////////////////////////////////////////////////
+
 async function safeFetch(url) {
-    const headers = { 
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36" 
-    };
-    
     try {
-        const res = await fetch(url, { headers });
+        const proxyUrl = await proxyConfiguration.newUrl();
+        
+        // Using a real browser User-Agent is crucial
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        };
+
+        const res = await fetch(url, { headers, proxy: proxyUrl });
+
         if (res.status === 429) {
-            console.warn("⚠️ Rate limited. Cool down for 10s...");
-            await new Promise(r => setTimeout(r, 10000));
+            console.warn("⚠️ Rate limited (429). Sleeping 10s and rotating IP...");
+            await sleep(10000);
             return null;
         }
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        if (!res.ok) {
+            console.error(`❌ HTTP Error: ${res.status} for URL: ${url}`);
+            return null;
+        }
+
         return await res.json();
     } catch (err) {
-        console.error(`❌ Fetch failed for ${url}:`, err.message);
+        console.error("🔌 Fetch Error:", err.message);
         return null;
     }
 }
 
-// --- Execution ---
+//////////////////////////////////////////////////
+// SCRAPING LOGIC
+//////////////////////////////////////////////////
 
-const keywordsAI = ["AI", "ChatGPT"];
-const relationshipKeywords = ["partner", "roommate", "coworker"];
-let collectedData = [];
+let dataset = [];
+let collected = 0;
 
-// Flattening loops to prevent exponential requests
+// Optimization: We use fewer loops to avoid hitting Reddit 1000 times
 searchLoop:
 for (const ai of keywordsAI) {
     for (const rel of relationshipKeywords) {
-        if (collectedData.length >= maxPosts) break searchLoop;
+        if (collected >= maxPosts) break searchLoop;
 
-        // Using Reddit's OR/AND logic to reduce requests
-        const query = `(${ai}) AND (${rel}) AND (conflict OR argument) AND college`;
+        // Graduate level query tip: Use Reddit's boolean operators
+        const query = `${ai} ${rel} (conflict OR argument OR fight) college`;
         console.log(`🔍 Searching: ${query}`);
 
-        const searchUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&limit=10&sort=relevance`;
-        const searchResults = await safeFetch(searchUrl);
+        const searchData = await safeFetch(
+            `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&limit=25&sort=relevance`
+        );
 
-        const posts = searchResults?.data?.children || [];
+        const posts = searchData?.data?.children || [];
 
         for (const post of posts) {
-            if (collectedData.length >= maxPosts) break;
+            if (collected >= maxPosts) break;
 
             const p = post.data;
-            // Skip if it's a promotional post
-            if (p.over_18 || p.is_self === false) continue;
+            const fullText = `${p.title} ${p.selftext}`;
 
-            console.log(`📝 Processing post: ${p.title.substring(0, 50)}...`);
+            // Double check keywords to ensure data quality
+            if (contains(fullText, youthIndicators)) {
+                
+                console.log(`📑 Processing: ${p.title.substring(0, 40)}...`);
 
-            // Fetch comments
-            const detailUrl = `https://www.reddit.com${p.permalink}.json`;
-            const details = await safeFetch(detailUrl);
-            
-            let comments = [];
-            if (details && details[1]?.data?.children) {
-                comments = details[1].data.children
-                    .map(c => c.data?.body)
-                    .filter(Boolean);
+                // Fetch Comments
+                const commentsData = await safeFetch(`https://www.reddit.com${p.permalink}.json`);
+                
+                let comments = [];
+                if (Array.isArray(commentsData) && commentsData[1]?.data?.children) {
+                    comments = commentsData[1].data.children
+                        .map(c => c.data?.body)
+                        .filter(Boolean);
+                }
+
+                const entry = {
+                    url: `https://reddit.com${p.permalink}`,
+                    title: p.title,
+                    post_sentiment: getSentimentScore(fullText),
+                    avg_comment_sentiment: comments.length
+                        ? comments.map(c => getSentimentScore(c)).reduce((a, b) => a + b, 0) / comments.length
+                        : 0,
+                    comment_count: comments.length,
+                    created: new Date(p.created_utc * 1000).toISOString()
+                };
+
+                dataset.push(entry);
+                await Actor.pushData(entry);
+                collected++;
+
+                // Throttle to be polite to Reddit servers
+                await sleep(2000); 
             }
-
-            const entry = {
-                url: `https://reddit.com${p.permalink}`,
-                post_sentiment: getSentimentScore(`${p.title} ${p.selftext}`),
-                avg_comment_sentiment: comments.length 
-                    ? comments.reduce((acc, c) => acc + getSentimentScore(c), 0) / comments.length 
-                    : 0,
-                comment_count: comments.length,
-                created: new Date(p.created_utc * 1000).toISOString()
-            };
-
-            collectedData.push(entry);
-            await Actor.pushData(entry);
-            
-            // Critical: Wait between posts to avoid IP bans
-            await new Promise(r => setTimeout(r, 2000));
         }
     }
 }
 
-// --- Finalization ---
+//////////////////////////////////////////////////
+// FINALIZATION & STORAGE
+//////////////////////////////////////////////////
 
 const summary = {
-    total_posts: collectedData.length,
-    avg_post_sentiment: collectedData.length ? collectedData.reduce((s, d) => s + d.post_sentiment, 0) / collectedData.length : 0
+    total_posts: dataset.length,
+    avg_post_sentiment: dataset.length ? dataset.reduce((s, d) => s + d.post_sentiment, 0) / dataset.length : 0,
+    timestamp: new Date().toISOString()
 };
 
-// Save CSV
+console.log("📊 SUMMARY:", summary);
+
+// Create CSV for easy download
 const csvStringifier = createObjectCsvStringifier({
     header: [
         { id: 'url', title: 'URL' },
-        { id: 'post_sentiment', title: 'SENTIMENT' },
-        { id: 'comment_count', title: 'COMMENTS' }
+        { id: 'title', title: 'TITLE' },
+        { id: 'post_sentiment', title: 'POST_SENTIMENT' },
+        { id: 'avg_comment_sentiment', title: 'AVG_COMMENT_SENTIMENT' },
+        { id: 'comment_count', title: 'COMMENT_COUNT' },
+        { id: 'created', title: 'CREATED' }
     ]
 });
 
-const csv = csvStringifier.getHeaderString() + csvStringifier.stringifyRecords(collectedData);
-await Actor.setValue("RESULTS_CSV", csv, { contentType: "text/csv" });
-await Actor.setValue("SUMMARY", summary);
+const csv = csvStringifier.getHeaderString() + csvStringifier.stringifyRecords(dataset);
 
-console.log("✅ Done!", summary);
+await Actor.setValue("RESULTS_CSV", csv, { contentType: "text/csv" });
+await Actor.setValue("SUMMARY_JSON", summary);
+
+console.log("✅ Run completed successfully.");
 await Actor.exit();

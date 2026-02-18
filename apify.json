@@ -1,7 +1,5 @@
 {
-  "name": "ai-youth-conflict-research",
-  "title": "AI & Youth Partnership Conflict Research Actor",
-  "description": "Graduate-level scraper analyzing AI-related partnership conflicts among young people with statistics and CSV export.",
-  "version": "3.0",
-  "buildTag": "latest"
+	"name": "ai-youth-conflict-research",
+	"template": "project_empty",
+	"version": "1.0.0"
 }
