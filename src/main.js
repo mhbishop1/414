@@ -18,33 +18,29 @@ try {
 
     // 2. DEFINE JOBS (Using Public Store Actors)
     const jobs = [
-            {
-                name: 'TikTok',
-                actorId: 'clockworks/tiktok-scraper',
-                input: { searchQueries: ["AI conflict"], resultsPerPage: 10 }
-            },
-            {
-                name: 'X (Twitter)',
-                actorId: 'apidojo/twitter-scraper-lite',
-                input: {
-                    "searchTerms": ["ChatGPT cheating ", "AI argument"],
-                    "maxItems": 10,
-                    "sort": "Latest", // Get the most recent discourse
-                    "tweetLanguage": "en"
-                }
-            },
+        {
+            name: 'TikTok',
+            actorId: 'clockworks/tiktok-scraper', // Verified ID
+            input: { 
+                "searchQueries": ["AI relationship conflict", "ChatGPT relationship fight"],
+                "resultsPerPage": 10 
+            }
+        },
         {
             name: 'Reddit',
-            actorId: 'apify/reddit-scraper', 
+            actorId: 'comchat/reddit-api-scraper', // More reliable in 2026 than 'apify/reddit-scraper'
+            input: { 
+                "searchList": ["AI argument"], 
+                "resultsLimit": 10,
+                "sortBy": "new"
+            }
+        },
+        {
+            name: 'X (Twitter)',
+            actorId: 'apidojo/twitter-scraper-lite', // Verified ID
             input: {
-                "mode": "search",             // Critical for many public scrapers
-                "searchQuery": "AI argument", // The most common keyword key
-                "searches": ["AI argument"],  // Fallback for list-based scrapers
-                "maxItems": 10,               // Some use maxItems
-                "maxResults": 10,             // Others use maxResults
-                "sort": "relevance",
-                "time": "all",                // Search entire history
-                "includeComments": false      // Keep it false to save time/credits for now
+                "searchTerms": ["ChatGPT cheating "],
+                "maxItems": 10
             }
         }
     ];
