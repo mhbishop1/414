@@ -3,65 +3,63 @@ import { ApifyClient } from 'apify-client';
 
 await Actor.init();
 
-// The platform automatically provides your API token here
-const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
+// 1. GET INPUT (including the secret API token)
+const input = await Actor.getInput() || {};
+const apiToken = input.apiToken || process.env.APIFY_TOKEN;
+
+if (!apiToken) {
+    await Actor.fail('❌ Missing API Token! Please provide your token in the Actor input.');
+}
+
+const client = new ApifyClient({ token: apiToken });
 
 try {
     console.log("🚀 Starting the Group Research Orchestrator...");
 
-    // 1. DEFINE YOUR SCRAPING TASKS
-    // We call public actors by their Store IDs (e.g., 'apify/instagram-scraper')
+    // 2. DEFINE JOBS (Using Public Store Actors)
     const jobs = [
         {
             name: 'TikTok',
             actorId: 'clockworks/tiktok-scraper',
-            input: { searchQueries: ["AI conflict"], resultsPerPage: 20 }
+            input: { searchQueries: ["AI student conflict", "ChatGPT college fight"], resultsPerPage: 10 }
         },
         {
             name: 'Reddit',
-            actorId: 'comchat/reddit-api-scraper', // Or your group mate's specific public actor
-            input: { searchTerms: ["ai", "ai-advicex"], maxPosts: 20 }
+            actorId: 'apify/reddit-scraper',
+            input: { searchTerms: ["AI university argument"], maxPosts: 10 }
         }
     ];
 
-    // 2. RUN ACTORS IN PARALLEL
-    console.log("📡 Triggering all public actors...");
-    const runPromises = jobs.map(job => 
-        client.actor(job.actorId).call(job.input)
-    );
-
+    // 3. RUN IN PARALLEL
+    console.log("📡 Launching scrapers simultaneously...");
+    const runPromises = jobs.map(job => client.actor(job.actorId).call(job.input));
     const runs = await Promise.all(runPromises);
 
-    // 3. MERGE THE RESULTS
-    console.log("📥 All runs finished. Merging data...");
+    // 4. MERGE & NORMALIZE
+    console.log("📥 Merging results into a single dataset...");
     const masterDataset = [];
 
     for (let i = 0; i < runs.length; i++) {
-        const run = runs[i];
-        const jobName = jobs[i].name;
-
-        // Fetch items from this specific run's dataset
-        const { items } = await client.dataset(run.defaultDatasetId).listItems();
-
-        // NORMALIZE: Ensure TikTok and Reddit data use the same column names
-        const normalizedItems = items.map(item => ({
-            platform: jobName,
-            text_content: item.text || item.body || item.selftext || "No text",
-            author: item.authorUsername || item.author || "Anonymous",
+        const { items } = await client.dataset(runs[i].defaultDatasetId).listItems();
+        
+        const normalized = items.map(item => ({
+            platform: jobs[i].name,
+            content: item.text || item.body || item.selftext || "No text found",
+            user: item.authorUsername || item.author || "Anonymous",
             url: item.webVideoUrl || `https://reddit.com${item.permalink}` || item.url,
-            scraped_at: new Date().toISOString()
+            collected_at: new Date().toISOString()
         }));
 
-        masterDataset.push(...normalizedItems);
+        masterDataset.push(...normalized);
     }
 
-    // 4. SAVE TO ONE MASTER FILE
+    // 5. SAVE FINAL DATA
     await Actor.pushData(masterDataset);
-    console.log(`🏁 Success! Master dataset created with ${masterDataset.length} rows.`);
+    console.log(`🏁 Success! Collected ${masterDataset.length} rows of research data.`);
 
 } catch (error) {
-    console.error("❌ Orchestrator failed:", error.message);
-    await Actor.fail();
+    console.error("❌ Orchestrator Error:", error.message);
+    await Actor.fail(error.message);
 }
 
 await Actor.exit();
