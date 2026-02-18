@@ -22,25 +22,30 @@ try {
         {
             name: 'TikTok',
             actorId: 'clockworks/tiktok-scraper',
+            // TikTok uses "resultsPerPage" as a total limit for search
             input: { 
-                searchQueries: ["AI student conflict"], 
-                resultsPerPage: 5 
+                searchQueries: ["AI conflict", "ChatGPT fight"], 
+                resultsPerPage: 100 
             }
         },
         {
             name: 'Reddit',
             actorId: 'comchat/reddit-api-scraper',
+            // Reddit uses "resultsLimit"
             input: { 
-                searchList: ["AI university argument"], 
-                resultsLimit: 5 
+                searchList: ["AI argument", "AI arguement reddit", "Ai Relationship Advice"], 
+                resultsLimit: 100,
+                sortBy: "relevance"
             }
         },
         {
             name: 'X (Twitter)',
             actorId: 'apidojo/twitter-scraper-lite',
+            // X uses "maxItems"
             input: { 
-                searchTerms: ["ChatGPT cheating university"], 
-                maxItems: 5 
+                searchTerms: ["ChatGPT cheating relationship", "AI relationship argument"], 
+                maxItems: 100,
+                sort: "Latest" 
             }
         }
     ];
@@ -48,7 +53,7 @@ try {
     // 3. RUN IN PARALLEL
     console.log("📡 Launching scrapers for TikTok, Reddit, and X...");
     const runPromises = jobs.map(job => 
-        client.actor(job.actorId).call(job.input)
+        client.actor(job.actorId).call(job.input, { waitTimeoutSecs: 900 })
     );
     const runs = await Promise.all(runPromises);
 
