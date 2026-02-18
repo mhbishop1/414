@@ -53,7 +53,7 @@ try {
     // 3. RUN IN PARALLEL
     console.log("📡 Launching scrapers for TikTok, Reddit, and X...");
     const runPromises = jobs.map(job => 
-        client.actor(job.actorId).call(job.input, { waitTimeoutSecs: 900 })
+        client.actor(job.actorId).call(job.input, { waitSecs: 900 })
     );
     const runs = await Promise.all(runPromises);
 
