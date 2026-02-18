@@ -18,15 +18,34 @@ try {
 
     // 2. DEFINE JOBS (Using Public Store Actors)
     const jobs = [
-        {
-            name: 'TikTok',
-            actorId: 'clockworks/tiktok-scraper',
-            input: { searchQueries: ["AI student conflict", "ChatGPT college fight"], resultsPerPage: 10 }
-        },
+            {
+                name: 'TikTok',
+                actorId: 'clockworks/tiktok-scraper',
+                input: { searchQueries: ["AI conflict"], resultsPerPage: 10 }
+            },
+            {
+                name: 'X (Twitter)',
+                actorId: 'apidojo/twitter-scraper-lite',
+                input: {
+                    "searchTerms": ["ChatGPT cheating ", "AI argument"],
+                    "maxItems": 10,
+                    "sort": "Latest", // Get the most recent discourse
+                    "tweetLanguage": "en"
+                }
+            },
         {
             name: 'Reddit',
-            actorId: 'apify/reddit-scraper',
-            input: { searchTerms: ["AI university argument"], maxPosts: 10 }
+            actorId: 'apify/reddit-scraper', 
+            input: {
+                "mode": "search",             // Critical for many public scrapers
+                "searchQuery": "AI argument", // The most common keyword key
+                "searches": ["AI argument"],  // Fallback for list-based scrapers
+                "maxItems": 10,               // Some use maxItems
+                "maxResults": 10,             // Others use maxResults
+                "sort": "relevance",
+                "time": "all",                // Search entire history
+                "includeComments": false      // Keep it false to save time/credits for now
+            }
         }
     ];
 
@@ -36,22 +55,23 @@ try {
     const runs = await Promise.all(runPromises);
 
     // 4. MERGE & NORMALIZE
-    console.log("📥 Merging results into a single dataset...");
-    const masterDataset = [];
-
-    for (let i = 0; i < runs.length; i++) {
-        const { items } = await client.dataset(runs[i].defaultDatasetId).listItems();
-        
-        const normalized = items.map(item => ({
+    const normalized = items.map(item => {
+        // Stage 1: Content Extraction (X uses 'full_text', Reddit uses 'selftext', TikTok uses 'text')
+        const rawContent = item.full_text || item.text || item.body || item.selftext || "";
+        const cleanContent = rawContent.replace(/\n/g, ' ').trim();
+    
+        // Stage 2: User Extraction
+        const username = item.user?.screen_name || item.authorUsername || item.author || "Anonymous";
+    
+        return {
             platform: jobs[i].name,
-            content: item.text || item.body || item.selftext || "No text found",
-            user: item.authorUsername || item.author || "Anonymous",
-            url: item.webVideoUrl || `https://reddit.com${item.permalink}` || item.url,
+            content: cleanContent || "No text found",
+            user: username,
+            url: item.url || item.webVideoUrl || (item.id ? `https://x.com/i/web/status/${item.id}` : ""),
+            engagement: item.favorite_count || item.ups || item.diggCount || 0,
             collected_at: new Date().toISOString()
-        }));
-
-        masterDataset.push(...normalized);
-    }
+        };
+    });
 
     // 5. SAVE FINAL DATA
     await Actor.pushData(masterDataset);
