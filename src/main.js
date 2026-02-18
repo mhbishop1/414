@@ -68,4 +68,33 @@ try {
     await Actor.fail(error.message);
 }
 
+// --- STAGE 3: DATA MERGING & NORMALIZATION ---
+const combinedData = [];
+
+// Normalize TikTok Data
+tiktokItems.forEach(item => {
+    combinedData.push({
+        platform: 'TikTok',
+        text: item.text || item.comment_text,
+        date: item.createTimeISO,
+        url: item.webVideoUrl || item.video_url,
+        engagement: item.diggCount || 0
+    });
+});
+
+// Normalize Reddit Data (If you run it in the same script)
+redditItems.forEach(item => {
+    combinedData.push({
+        platform: 'Reddit',
+        text: item.selftext || item.title,
+        date: new Date(item.created_utc * 1000).toISOString(),
+        url: `https://reddit.com${item.permalink}`,
+        engagement: item.ups || 0
+    });
+});
+
+// Export to ONE single CSV
+const csv = csvStringifier.getHeaderString() + csvStringifier.stringifyRecords(combinedData);
+await Actor.setValue("MASTER_RESEARCH_DATA.csv", csv, { contentType: "text/csv" });
+
 await Actor.exit();
