@@ -1,12 +1,15 @@
 {
-  "title": "AI Youth Conflict Research Input",
-  "type": "object",
-  "schemaVersion": 1,
-  "properties": {
-    "maxPosts": {
-      "title": "Maximum Posts",
-      "type": "integer",
-      "default": 50
-    }
-  }
+    "title": "AI Youth Conflict Scraper",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "maxPosts": {
+            "title": "Max Posts",
+            "type": "integer",
+            "description": "The maximum number of Reddit posts to scrape for your research.",
+            "default": 50,
+            "minimum": 1
+        }
+    },
+    "required": ["maxPosts"]
 }
