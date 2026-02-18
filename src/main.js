@@ -1,100 +1,67 @@
 import { Actor } from 'apify';
 import { ApifyClient } from 'apify-client';
-import { createObjectCsvStringifier } from 'csv-writer';
 
 await Actor.init();
 
-// Use the token from the environment (automatic on Apify)
-const client = new ApifyClient({
-    token: process.env.APIFY_TOKEN,
-});
-
-const input = await Actor.getInput() || {};
-const maxVideos = input.maxVideos || 3; 
-
-console.log("🚀 Researcher Orchestrator Started...");
+// The platform automatically provides your API token here
+const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
 
 try {
-    // --- STAGE 1: FIND VIDEOS ---
-    const searchInput = {
-        "searchQueries": ["ChatGPT college argument", "AI university conflict"],
-        "resultsPerPage": maxVideos
-    };
+    console.log("🚀 Starting the Group Research Orchestrator...");
 
-    console.log("🔍 Stage 1: Searching TikTok for videos...");
-    const videoRun = await client.actor("clockworks/tiktok-scraper").call(searchInput);
-    
-    // SAFETY GATE: Check if the run produced results
-    const { items: videos } = await client.dataset(videoRun.defaultDatasetId).listItems();
+    // 1. DEFINE YOUR SCRAPING TASKS
+    // We call public actors by their Store IDs (e.g., 'apify/instagram-scraper')
+    const jobs = [
+        {
+            name: 'TikTok',
+            actorId: 'clockworks/tiktok-scraper',
+            input: { searchQueries: ["AI student conflict"], resultsPerPage: 20 }
+        },
+        {
+            name: 'Reddit',
+            actorId: 'apify/reddit-scraper', // Or your group mate's specific public actor
+            input: { searchTerms: ["ChatGPT university argument"], maxPosts: 20 }
+        }
+    ];
 
-    if (!videos || videos.length === 0) {
-        throw new Error("Stage 1 failed: No videos were found for these keywords. Try broader terms.");
+    // 2. RUN ACTORS IN PARALLEL
+    console.log("📡 Triggering all public actors...");
+    const runPromises = jobs.map(job => 
+        client.actor(job.actorId).call(job.input)
+    );
+
+    const runs = await Promise.all(runPromises);
+
+    // 3. MERGE THE RESULTS
+    console.log("📥 All runs finished. Merging data...");
+    const masterDataset = [];
+
+    for (let i = 0; i < runs.length; i++) {
+        const run = runs[i];
+        const jobName = jobs[i].name;
+
+        // Fetch items from this specific run's dataset
+        const { items } = await client.dataset(run.defaultDatasetId).listItems();
+
+        // NORMALIZE: Ensure TikTok and Reddit data use the same column names
+        const normalizedItems = items.map(item => ({
+            platform: jobName,
+            text_content: item.text || item.body || item.selftext || "No text",
+            author: item.authorUsername || item.author || "Anonymous",
+            url: item.webVideoUrl || `https://reddit.com${item.permalink}` || item.url,
+            scraped_at: new Date().toISOString()
+        }));
+
+        masterDataset.push(...normalizedItems);
     }
 
-    const videoUrls = videos.map(v => v.webVideoUrl).filter(url => !!url);
-    console.log(`✅ Found ${videoUrls.length} videos. URLs:`, videoUrls);
-
-    // --- STAGE 2: SCRAPE COMMENTS ---
-    console.log("💬 Stage 2: Starting comment extraction...");
-    const commentInput = {
-        "postURLs": videoUrls,
-        "commentsPerPost": 20,
-        "maxRepliesPerComment": 0 
-    };
-
-    const commentRun = await client.actor("clockworks/tiktok-comments-scraper").call(commentInput);
-    const { items: comments } = await client.dataset(commentRun.defaultDatasetId).listItems();
-
-    // SAFETY GATE: Handle empty comment sections
-    if (!comments || comments.length === 0) {
-        console.log("⚠️ No comments found for these videos. Finishing run with empty dataset.");
-        await Actor.exit();
-        return;
-    }
-
-    // --- STAGE 3: DATA EXPORT ---
-    const finalResults = comments.map(c => ({
-        video_url: c.videoUrl,
-        text: c.text,
-        date: c.createTimeISO
-    }));
-
-    await Actor.pushData(finalResults);
-    console.log(`🏁 Success! Gathered ${finalResults.length} comments.`);
+    // 4. SAVE TO ONE MASTER FILE
+    await Actor.pushData(masterDataset);
+    console.log(`🏁 Success! Master dataset created with ${masterDataset.length} rows.`);
 
 } catch (error) {
-    // This catches the "Uncaught Exception" and prints a helpful message instead of crashing
-    console.error("❌ CRITICAL ERROR:", error.message);
-    await Actor.fail(error.message);
+    console.error("❌ Orchestrator failed:", error.message);
+    await Actor.fail();
 }
-
-// --- STAGE 3: DATA MERGING & NORMALIZATION ---
-const combinedData = [];
-
-// Normalize TikTok Data
-tiktokItems.forEach(item => {
-    combinedData.push({
-        platform: 'TikTok',
-        text: item.text || item.comment_text,
-        date: item.createTimeISO,
-        url: item.webVideoUrl || item.video_url,
-        engagement: item.diggCount || 0
-    });
-});
-
-// Normalize Reddit Data (If you run it in the same script)
-redditItems.forEach(item => {
-    combinedData.push({
-        platform: 'Reddit',
-        text: item.selftext || item.title,
-        date: new Date(item.created_utc * 1000).toISOString(),
-        url: `https://reddit.com${item.permalink}`,
-        engagement: item.ups || 0
-    });
-});
-
-// Export to ONE single CSV
-const csv = csvStringifier.getHeaderString() + csvStringifier.stringifyRecords(combinedData);
-await Actor.setValue("MASTER_RESEARCH_DATA.csv", csv, { contentType: "text/csv" });
 
 await Actor.exit();
